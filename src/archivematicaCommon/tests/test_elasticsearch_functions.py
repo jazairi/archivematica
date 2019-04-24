@@ -239,3 +239,66 @@ class TestElasticSearchFunctions(unittest.TestCase):
             self.client, ["aips", "aipfiles", "unknown"]
         )
         assert patch.call_count == 2
+
+    @mock.patch("elasticSearchFunctions.get_dashboard_uuid")
+    @mock.patch("elasticSearchFunctions._wait_for_cluster_yellow_status")
+    @mock.patch("elasticSearchFunctions._try_to_index")
+    def test_index_aipfile_fileuuid(
+        self,
+        dummy_try_to_index,
+        dummy_wait_for_cluster_yellow_status,
+        dummy_get_dashboard_uuid,
+    ):
+        # Set up mocked up functions
+        dummy_get_dashboard_uuid.return_value = "test-uuid"
+
+        # replace _try_to_index() with a function that returns
+        # fileuuids that are passed to it to be indexed
+        indexed_data = {}
+
+        def get_fileuuid(client, indexData, index, printfn):
+            indexed_data[indexData["filePath"]] = indexData["FILEUUID"]
+
+        dummy_try_to_index.side_effect = get_fileuuid
+
+        # fixture is a METS file with namespaces
+        mets_file_path = os.path.join(
+            THIS_DIR, "fixtures", "test_index_fileuuid-METS-namespaced.xml"
+        )
+        uuid = "9559945a-52e8-4eb4-ac1a-e0e794e758fb"
+        sipName = "MAPS2015-AM641-{}".format(uuid)
+        identifiers = []
+        indexed_files_count = elasticSearchFunctions._index_aip_files(
+            client=self.client,
+            uuid=uuid,
+            mets_path=mets_file_path,
+            name=sipName,
+            identifiers=identifiers,
+        )
+
+        # ES should have indexed 4 files
+        assert indexed_files_count == 4
+        assert dummy_try_to_index.call_count == 4
+
+        # Check fileuuids are correct
+        file_uuids = (
+            {
+                "filePath": "objects/MAPS2015-AM641-csv.csv",
+                "FILEUUID": "e2e24c59-8cf9-46d3-8cac-9a113a12d6f4",
+            },
+            {
+                "filePath": "objects/metadata/transfers/MAPS2015-AM641-44f3ee8e-88fd-424c-9d2b-f35d69b148e1/directory_tree.txt",
+                "FILEUUID": "44d3aa6d-8bb0-4cfb-bd93-f1121c08916e",
+            },
+            {
+                "filePath": "objects/LEG1363.01.TIF",
+                "FILEUUID": "0552c02b-8626-456f-89cc-bc5f3ce8a112",
+            },
+            {
+                "filePath": "objects/metadata/transfers/MAPS2015-AM641-44f3ee8e-88fd-424c-9d2b-f35d69b148e1/checksum.md5",
+                "FILEUUID": "83aaf419-ec27-4105-b7fd-29df4b07b50e",
+            },
+        )
+        for file_uuid in file_uuids:
+            indexed_fileuuid = indexed_data[file_uuid["filePath"]]
+            assert indexed_fileuuid == file_uuid["FILEUUID"]
